@@ -1,15 +1,11 @@
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+
 #include <Arduino.h>
 #include "analogWrite.h"
 #include "rdm6300.h"
-#include "Ultrasonic.h"
-
-//Pinos driver pontw H L298
-#define MotorA_sentido1 33 // IN1
-#define MotorA_sentido2 25 // IN2
-#define MotorB_sentido1 26 // IN3
-#define MotorB_sentido2 27 // IN4
-#define MotorA_PWM 32  // Right Motors
-#define MotorB_PWM 14 // Left Motors
+#include "HC_SR04.h"
+#include "Motor.h"
 
 //Pinos dos sensores
 #define Sensor_direita 35 // LSR
@@ -36,17 +32,18 @@
 
 HC_SR04 ultrassom(PIN_TRIGGER, PIN_ECHO);
 Rdm6300 rdm6300;
-int direita, esquerda, central, lat_dir, lat_esq, parada;
+Motor motorEsq(14, 27, 26);
+Motor motorDir(32, 33, 25);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
 
 void setup() {
     Serial.begin(9600);
     rdm6300.begin(RXD2);
-    pinMode(MotorA_sentido1, OUTPUT);
-    pinMode(MotorA_sentido2, OUTPUT);
-    pinMode(MotorB_sentido1, OUTPUT);
-    pinMode(MotorB_sentido2, OUTPUT);
-    pinMode(MotorA_PWM, OUTPUT);
-    pinMode(MotorB_PWM, OUTPUT);
+    Wire.begin();
+    lcd.backlight();
+    lcd.begin(16,2);
+    
     pinMode(Sensor_direita, INPUT);
     pinMode(Sensor_esquerda, INPUT);
     pinMode(Sensor_central, INPUT);
@@ -58,53 +55,84 @@ void setup() {
     analogWriteFrequency(100);
     //SETAR RESOLUCAO EM 10 Bits
     analogWriteResolution(10); 
+
+    ultrassom.begin();
+    ultrassom.start();
 }
 
 
-#define SPEED_FORWARD 700
-#define SPEED_TURN_IN 600
-#define SPEED_TURN_OUT 600
+enum Direcao {
+  RETO,
+  ESQ,
+  DIR
+};
+
+float velocidade = .3;
+float dist = 100;
+Direcao direcao = RETO;
+
 void loop() {
-    direita = digitalRead(Sensor_direita);
-    esquerda = digitalRead(Sensor_esquerda);
-    central = digitalRead(Sensor_central);
-    lat_dir = digitalRead(Sensor_lat_dir);
-    lat_esq = digitalRead(Sensor_lat_esq);
-    parada = digitalRead(Sensor_parada);
+  if (ultrassom.isFinished()) {
+    dist = ultrassom.getRange();
+    Serial.printf("Dist=%f\n", dist);
+    ultrassom.start();
+  }
 
+  bool direita = digitalRead(Sensor_direita);
+  bool esquerda = digitalRead(Sensor_esquerda);
+  bool central = digitalRead(Sensor_central);
+  bool lat_dir = digitalRead(Sensor_lat_dir);
+  bool lat_esq = digitalRead(Sensor_lat_esq);
+  bool parada = digitalRead(Sensor_parada);
 
-    Serial.print(lat_esq);
-    Serial.print(esquerda);
-    Serial.print(central);
-    Serial.print(direita);
-    Serial.print(lat_dir);
-    Serial.print("  ");
-    Serial.print(parada);
-    Serial.println();
+  if (lat_dir == 1 && lat_esq == 1) {
+    //Desacelera
+    velocidade = .3;
+  } else if (lat_dir == 1 || lat_esq == 1) {
+    velocidade = .35;
+  } else {
+    velocidade = 1;
+  }
 
-    if (direita == 0 && esquerda == 0) {
-      //Vai reto
-      digitalWrite(MotorA_sentido1, LOW);
-      digitalWrite(MotorA_sentido2, HIGH);
-      analogWrite(MotorA_PWM, SPEED_FORWARD, 1023);
-      digitalWrite(MotorB_sentido1, HIGH);
-      digitalWrite(MotorB_sentido2, LOW);
-      analogWrite(MotorB_PWM, SPEED_FORWARD, 1023);
-    } else if (direita == 1 && esquerda == 0) {
-      //Vira pra Esquerda
-      digitalWrite(MotorA_sentido1, HIGH);
-      digitalWrite(MotorA_sentido2, LOW);
-      analogWrite(MotorA_PWM, SPEED_TURN_IN, 1023);
-      digitalWrite(MotorB_sentido1, HIGH);
-      digitalWrite(MotorB_sentido2, LOW);
-      analogWrite(MotorB_PWM, SPEED_TURN_OUT, 1023);
-    } else if (direita == 0 && esquerda == 1) {
-      //Vira pra Direita 
-      digitalWrite(MotorA_sentido1, LOW);
-      digitalWrite(MotorA_sentido2, HIGH);
-      analogWrite(MotorA_PWM, SPEED_TURN_OUT, 1023);
-      digitalWrite(MotorB_sentido1, LOW);
-      digitalWrite(MotorB_sentido2, HIGH);
-      analogWrite(MotorB_PWM, SPEED_TURN_IN, 1023);
-    }
+  //  35cm -- Vel maxima
+  //  10cm -- Motor desligado
+  // <10cm -- Motor freiando
+  if (dist < 10) {
+    motorEsq.slowDown();
+    motorDir.slowDown();
+    velocidade = 0;
+  } else if (dist < 35) {
+    velocidade *= ((dist - 10) / 25.);
+  }
+  lcd.setCursor(0, 0);
+  lcd.print("vel=");
+  lcd.print(velocidade);
+  lcd.setCursor(0, 1);
+  lcd.print("dist=");
+  lcd.print(dist);
+  
+
+  if (direita == 0 && esquerda == 0) {
+    direcao = RETO;
+  } else if (direita == 1 && esquerda == 0) {
+    direcao = DIR;
+  } else if (direita == 0 && esquerda == 1) {
+    direcao = ESQ;
+  }
+
+  direcao = RETO;
+  switch (direcao) {
+    case RETO:
+      motorEsq.setSpeed(velocidade);
+      motorDir.setSpeed(velocidade);
+      break;
+    case DIR:
+      motorEsq.setSpeed(+1);
+      motorDir.setSpeed(-1);
+      break;
+    case ESQ:
+      motorEsq.setSpeed(-1);
+      motorDir.setSpeed(+1);
+      break;
+  }
 } 
