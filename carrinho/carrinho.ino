@@ -38,7 +38,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 
 void setup() {
-    Serial.begin(9600);
+    Serial.begin(115200);
     rdm6300.begin(RXD2);
     Wire.begin();
     lcd.backlight();
@@ -57,7 +57,6 @@ void setup() {
     analogWriteResolution(10); 
 
     ultrassom.begin();
-    ultrassom.start();
 }
 
 
@@ -68,15 +67,10 @@ enum Direcao {
 };
 
 float velocidade = .3;
-float dist = 100;
 Direcao direcao = RETO;
 
 void loop() {
-  if (ultrassom.isFinished()) {
-    dist = ultrassom.getRange();
-    Serial.printf("Dist=%f\n", dist);
-    ultrassom.start();
-  }
+  float dist = ultrassom.getDistance();
 
   bool direita = digitalRead(Sensor_direita);
   bool esquerda = digitalRead(Sensor_esquerda);
