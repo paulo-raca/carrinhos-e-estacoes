@@ -1,4 +1,4 @@
-#include "HC_SR04.h"
+#include "AsyncUltrasonic.h"
 #include <FunctionalInterrupt.h>
 
 #define SOUND_SPEED 343.0 //m/s
@@ -6,23 +6,22 @@
 #define ECHO_TIMEOUT (2*MAX_DIST / SOUND_SPEED)
 
 
-HC_SR04::HC_SR04(int trigger, int echo)
+AsyncUltrasonic::AsyncUltrasonic(int trigger, int echo)
     : pin_trigger(trigger), pin_echo(echo), state(State::trig_off), measurementUs(-1)
 { }
 
 
-void HC_SR04::begin() {
+void AsyncUltrasonic::begin() {
   pinMode(pin_trigger, OUTPUT);
   pinMode(pin_echo, INPUT_PULLDOWN);
   digitalWrite(pin_trigger, LOW);
   
   uint32_t now = micros();
   state = State::trig_off;
-  hasNew = false;
-  attachInterrupt(pin_echo, std::bind(&HC_SR04::isr, this), CHANGE);
+  attachInterrupt(pin_echo, std::bind(&AsyncUltrasonic::isr, this), CHANGE);
 }
 
-void HC_SR04::end() {
+void AsyncUltrasonic::end() {
   detachInterrupt(pin_echo);
   measurementUs = -1;
   pinMode(pin_trigger, INPUT);
@@ -31,7 +30,7 @@ void HC_SR04::end() {
 
 static volatile int c1=0, c2=0, c3=0, is0=0, is1=1;
 
-float HC_SR04::getDistance() {
+float AsyncUltrasonic::getDistance() {
     uint32_t now = micros();
     uint32_t elapsedMicros = now - timestamp;
 
@@ -39,10 +38,6 @@ float HC_SR04::getDistance() {
    float ret = NAN;
     if (measurementUs >= 0) {
         ret = measurementUs * 100 * SOUND_SPEED / (2 * 1000000);
-    }
-    if (hasNew) {
-        Serial.printf("measurementUs=%.1f\n", ret);
-        hasNew = false;
     }
     
     switch (state) {
@@ -72,7 +67,7 @@ float HC_SR04::getDistance() {
     return ret;
 }
 
-void IRAM_ATTR HC_SR04::isr() {
+void IRAM_ATTR AsyncUltrasonic::isr() {
     bool pinState = digitalRead(pin_echo);
     c1++;
     if (state == State::waiting_response && pinState) {
@@ -85,7 +80,6 @@ void IRAM_ATTR HC_SR04::isr() {
         uint32_t now = micros();
         measurementUs = now - timestamp;
         timestamp = now;
-        hasNew = true;
         digitalWrite(pin_trigger, HIGH);
         state = State::trig_on;
     }

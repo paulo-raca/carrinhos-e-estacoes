@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include "analogWrite.h"
 #include "rdm6300.h"
-#include "HC_SR04.h"
+#include "AsyncUltrasonic.h"
 #include "Motor.h"
 
 //Pinos dos sensores
@@ -30,7 +30,7 @@
 #define veloc3 1000 // Giro externo
 #define veloc4 552 // Reduzida
 
-HC_SR04 ultrassom(PIN_TRIGGER, PIN_ECHO);
+AsyncUltrasonic distanceSensor(PIN_TRIGGER, PIN_ECHO);
 Rdm6300 rdm6300;
 Motor motorEsq(14, 27, 26);
 Motor motorDir(32, 33, 25);
@@ -56,7 +56,7 @@ void setup() {
     //SETAR RESOLUCAO EM 10 Bits
     analogWriteResolution(10); 
 
-    ultrassom.begin();
+    distanceSensor.begin();
 }
 
 
@@ -70,63 +70,66 @@ float velocidade = .3;
 Direcao direcao = RETO;
 
 void loop() {
-  float dist = ultrassom.getDistance();
-
-  bool direita = digitalRead(Sensor_direita);
-  bool esquerda = digitalRead(Sensor_esquerda);
-  bool central = digitalRead(Sensor_central);
-  bool lat_dir = digitalRead(Sensor_lat_dir);
-  bool lat_esq = digitalRead(Sensor_lat_esq);
-  bool parada = digitalRead(Sensor_parada);
-
-  if (lat_dir == 1 && lat_esq == 1) {
-    //Desacelera
-    velocidade = .3;
-  } else if (lat_dir == 1 || lat_esq == 1) {
-    velocidade = .35;
-  } else {
-    velocidade = 1;
-  }
-
-  //  35cm -- Vel maxima
-  //  10cm -- Motor desligado
-  // <10cm -- Motor freiando
-  if (dist < 10) {
-    motorEsq.slowDown();
-    motorDir.slowDown();
-    velocidade = 0;
-  } else if (dist < 35) {
-    velocidade *= ((dist - 10) / 25.);
-  }
-  lcd.setCursor(0, 0);
-  lcd.print("vel=");
-  lcd.print(velocidade);
-  lcd.setCursor(0, 1);
-  lcd.print("dist=");
-  lcd.print(dist);
+    float dist = distanceSensor.getDistance();
   
+    bool direita = digitalRead(Sensor_direita);
+    bool esquerda = digitalRead(Sensor_esquerda);
+    bool central = digitalRead(Sensor_central);
+    bool lat_dir = digitalRead(Sensor_lat_dir);
+    bool lat_esq = digitalRead(Sensor_lat_esq);
+    bool parada = digitalRead(Sensor_parada);
+ 
+    if (direita == 0 && esquerda == 0) {
+      direcao = RETO;
+    } else if (direita == 1 && esquerda == 0) {
+      direcao = DIR;
+    } else if (direita == 0 && esquerda == 1) {
+      direcao = ESQ;
+    }
 
-  if (direita == 0 && esquerda == 0) {
+    // Reduz velocidade quando detecta faixas laterais
+    if (lat_dir == 1 && lat_esq == 1) {
+        velocidade = .3;
+    } else if (lat_dir == 1 || lat_esq == 1) {
+        velocidade = .4;
+    } else {
+        velocidade = 1;
+    }
+
+    // Reduz velocidade quando detecta obstáculo com sensor ultrasonico
+    //  35cm -- Vel maxima
+    //  10cm -- Motor desligado
+    // <10cm -- Motor freiando
+    if (dist < 10) {
+        motorEsq.stop();
+        motorDir.stop();
+        return;
+    } else if (dist < 35) {
+        velocidade *= ((dist - 10) / 25.);
+    }
+
+    
+    lcd.setCursor(0, 0);
+    lcd.print("vel=");
+    lcd.print(velocidade);
+    lcd.setCursor(0, 1);
+    lcd.print("dist=");
+    lcd.print(dist);
+
+  
     direcao = RETO;
-  } else if (direita == 1 && esquerda == 0) {
-    direcao = DIR;
-  } else if (direita == 0 && esquerda == 1) {
-    direcao = ESQ;
-  }
-
-  direcao = RETO;
-  switch (direcao) {
-    case RETO:
-      motorEsq.setSpeed(velocidade);
-      motorDir.setSpeed(velocidade);
-      break;
-    case DIR:
-      motorEsq.setSpeed(+1);
-      motorDir.setSpeed(-1);
-      break;
-    case ESQ:
-      motorEsq.setSpeed(-1);
-      motorDir.setSpeed(+1);
-      break;
-  }
+    switch (direcao) {
+      case RETO:
+        motorEsq.setSpeed(velocidade);
+        motorDir.setSpeed(velocidade);
+        break;
+      case DIR:
+        motorEsq.setSpeed(+1);
+        motorDir.setSpeed(-1);
+        break;
+      case ESQ:
+        motorEsq.setSpeed(-1);
+        motorDir.setSpeed(+1);
+        break;
+    }
 } 

@@ -30,7 +30,7 @@ public:
         analogWrite(this->pin_en, (int)(-speed*1023), 1023);
       }
   }
-  inline void slowDown(float strengh=1) {
+  inline void stop(float strengh=1) {
     if (strengh > 1)  strengh =  1;
     if (strengh < 0) strengh = 0;
     digitalWrite(this->pin_direction_1, LOW);
