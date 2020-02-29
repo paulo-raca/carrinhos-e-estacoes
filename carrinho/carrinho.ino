@@ -23,13 +23,6 @@
 #define RXD2 16
 #define TXD2 17
 
-//Pinos de velocidade
-#define veloc0 0 // Parada
-#define veloc1 1000 // Giro interno
-#define veloc2 1023 // Full
-#define veloc3 1000 // Giro externo
-#define veloc4 552 // Reduzida
-
 AsyncUltrasonic distanceSensor(PIN_TRIGGER, PIN_ECHO);
 Rdm6300 rdm6300;
 Motor motorEsq(14, 27, 26);
@@ -59,77 +52,227 @@ void setup() {
     distanceSensor.begin();
 }
 
+float velocidade = 0;
+float dist = 0;
+uint32_t tag = 0;
 
-enum Direcao {
-  RETO,
-  ESQ,
-  DIR
-};
+bool sensor_direita;
+bool sensor_esquerda;
+bool sensor_central;
+bool sensor_lat_dir;
+bool sensor_lat_esq;
+bool sensor_parada;
 
-float velocidade = .3;
-Direcao direcao = RETO;
 
-void loop() {
-    float dist = distanceSensor.getDistance();
+void atualizaSensores() {
+    sensor_direita = digitalRead(Sensor_direita);
+    sensor_esquerda = digitalRead(Sensor_esquerda);
+    sensor_central = digitalRead(Sensor_central);
+    sensor_lat_dir = digitalRead(Sensor_lat_dir);
+    sensor_lat_esq = digitalRead(Sensor_lat_esq);
+    sensor_parada = !digitalRead(Sensor_parada);
+    
+    dist = distanceSensor.getDistance();
   
-    bool direita = digitalRead(Sensor_direita);
-    bool esquerda = digitalRead(Sensor_esquerda);
-    bool central = digitalRead(Sensor_central);
-    bool lat_dir = digitalRead(Sensor_lat_dir);
-    bool lat_esq = digitalRead(Sensor_lat_esq);
-    bool parada = digitalRead(Sensor_parada);
- 
-    if (direita == 0 && esquerda == 0) {
-      direcao = RETO;
-    } else if (direita == 1 && esquerda == 0) {
-      direcao = DIR;
-    } else if (direita == 0 && esquerda == 1) {
-      direcao = ESQ;
+    rdm6300.update();
+    if (rdm6300.is_tag_near()) {
+        uint32_t _tag = rdm6300.get_tag_id();
+        if (_tag) {
+            tag = _tag;
+            lcd.setCursor(0, 1);
+            lcd.printf("%x", tag);
+        }
+    } else if (tag) {
+        tag = 0;
+        lcd.setCursor(0, 1);
+        lcd.printf("------");
     }
+}
 
+#define fsm_andando 0
+#define fsm_parando_na_casinha 1
+#define fsm_avancando_na_casinha 2
+#define fsm_re_na_casinha 3
+#define fsm_esperando_na_casinha 4
+#define fsm_saindo_da_casinha 5
+
+#define CARD_NONE 0
+#define CARD_OTHER 1
+#define CARD_MINE 2
+
+
+
+int card = CARD_NONE;
+int estadoAtual = fsm_andando;
+auto estadoAtualDesde = millis();
+
+int tempoNoEstadoAtual() {
+    return millis() - estadoAtualDesde;
+}
+
+void setState(int newState) {
+    estadoAtual = newState;
+    estadoAtualDesde = millis();
+}
+
+
+#define TEMPO_FREIO 1000
+#define TEMPO_SAIDA 1000
+#define TEMPO_NA_CASINHA 3000
+#define TEMPO_NA_CASINHA_ERRADA 1000
+#define TEMPO_MAX_RE 3000
+
+//Pinos de velocidade
+#define SPEED_FULL     1.0f
+#define SPEED_SLOWDOWN 0.3f
+
+#define DIST_SLOWDOWN 20
+#define DIST_FULLSTOP 10
+
+#define TAG_CASINHA1 0x786b1f
+#define TAG_CASINHA2 0x473d10
+
+void atualizaEstado() {
+/*
+    - FREIA por 500ms
+    - Anda pra trás até alinhar
+    - Espera um pouquinho
+    - vai embora
+*/
+    // Já leu a tag desta casinha, e não é a casinha que me interessa
+    if (tag == TAG_CASINHA1 || tag == TAG_CASINHA2) {
+        if (card != CARD_MINE) {
+            card = CARD_MINE;
+            Serial.printf("meu cartao: %x\n", tag);
+        }
+    } else if (tag) {
+        if (card != CARD_MINE && card != CARD_OTHER) {
+            card = CARD_OTHER;
+            Serial.printf("outro cartao: %x\n", tag);
+            if (estadoAtual != fsm_andando && estadoAtual != fsm_saindo_da_casinha) {
+                Serial.printf("ignorando esta casinha\n");
+                setState(fsm_saindo_da_casinha);
+            }
+        }
+    }
+    
+    switch (estadoAtual) {
+        case fsm_andando: {
+            if (card != CARD_NONE) {
+                card = CARD_NONE;
+                Serial.printf("Ignorando cartao\n");
+            }
+            velocidade = SPEED_FULL;
+            if (sensor_parada) {
+                Serial.printf("Achei uma casinha! Parou!\n");
+                setState(fsm_parando_na_casinha);
+            }
+            break;
+        }
+        case fsm_parando_na_casinha: {
+            velocidade = 0;
+            if (tempoNoEstadoAtual() >= TEMPO_FREIO) {
+                Serial.printf("Avançando devagar...\n");
+                setState(fsm_avancando_na_casinha);
+            }
+            break;
+        }
+        case fsm_avancando_na_casinha: {
+            velocidade = SPEED_SLOWDOWN;
+            if (!sensor_parada) {
+                setState(fsm_re_na_casinha);
+                /*if (meuCartao) {
+                    Serial.printf("Ops, passou! -- Voltando\n");
+                    setState(fsm_re_na_casinha);
+                } else {
+                    Serial.printf("Casinha errada -- bora!\n");
+                    setState(fsm_saindo_da_casinha);
+                }*/
+                setState(fsm_re_na_casinha);
+            }
+            break;
+        }
+
+        case fsm_re_na_casinha: {
+            velocidade = -SPEED_SLOWDOWN;
+            if (sensor_parada) {
+                // Chegou
+                Serial.printf("Voltei para a casinha!\n");
+                setState(fsm_esperando_na_casinha);
+            } else if (tempoNoEstadoAtual() >= TEMPO_MAX_RE) {
+                Serial.printf("Uai, perdi a casinha! -- Acelerando\n");
+                setState(fsm_andando);
+            }
+            break;
+        }
+
+        case fsm_esperando_na_casinha: {
+            velocidade = 0;
+            if (card == CARD_MINE && tempoNoEstadoAtual() >= TEMPO_NA_CASINHA) {
+                Serial.printf("Passei tempo suficiente na casinha -- Saindo\n");
+                setState(fsm_saindo_da_casinha);
+            }
+            if (card == CARD_NONE && tempoNoEstadoAtual() >= TEMPO_NA_CASINHA_ERRADA) {
+                Serial.printf("Não li meu cartao nesta casinha -- Saindo\n");
+                setState(fsm_saindo_da_casinha);
+            }
+            break;
+        }
+
+        
+        case fsm_saindo_da_casinha: {
+            velocidade = SPEED_FULL;
+            if (sensor_parada) {
+                setState(fsm_saindo_da_casinha);
+            } else if (tempoNoEstadoAtual() >= TEMPO_SAIDA) {
+                Serial.printf("Saiu -- Acelerando\n");
+                setState(fsm_andando);
+            }
+            break;
+        }
+    }
+}
+
+void segueLinha() {
+     float v = velocidade;
     // Reduz velocidade quando detecta faixas laterais
-    if (lat_dir == 1 && lat_esq == 1) {
-        velocidade = .3;
-    } else if (lat_dir == 1 || lat_esq == 1) {
-        velocidade = .4;
-    } else {
-        velocidade = 1;
+    if (sensor_lat_dir || sensor_lat_esq) {
+        if (v > SPEED_SLOWDOWN) {
+            v = SPEED_SLOWDOWN;
+        } else if (v < -SPEED_SLOWDOWN) {
+            v = -SPEED_SLOWDOWN;
+        }
     }
 
     // Reduz velocidade quando detecta obstáculo com sensor ultrasonico
-    //  35cm -- Vel maxima
-    //  10cm -- Motor desligado
-    // <10cm -- Motor freiando
-    if (dist < 10) {
-        motorEsq.stop();
-        motorDir.stop();
-        return;
-    } else if (dist < 35) {
-        velocidade *= ((dist - 10) / 25.);
+    if (v > 0) {
+        if (dist < DIST_FULLSTOP) {
+            v = 0;
+        } else if (dist < DIST_SLOWDOWN) {
+            v *= ((dist - DIST_FULLSTOP) / (DIST_SLOWDOWN - DIST_FULLSTOP));
+        }
     }
 
-    
-    lcd.setCursor(0, 0);
-    lcd.print("vel=");
-    lcd.print(velocidade);
-    lcd.setCursor(0, 1);
-    lcd.print("dist=");
-    lcd.print(dist);
-
-  
-    direcao = RETO;
-    switch (direcao) {
-      case RETO:
-        motorEsq.setSpeed(velocidade);
-        motorDir.setSpeed(velocidade);
-        break;
-      case DIR:
+    if (sensor_direita == 1 && sensor_esquerda == 0) {
         motorEsq.setSpeed(+1);
         motorDir.setSpeed(-1);
-        break;
-      case ESQ:
+    } else if (sensor_direita == 0 && sensor_esquerda == 1) {
         motorEsq.setSpeed(-1);
         motorDir.setSpeed(+1);
-        break;
-    }
-} 
+    } else if (v == 0) {
+        motorEsq.stop();
+        motorDir.stop();
+    } else {
+        motorEsq.setSpeed(v);
+        motorDir.setSpeed(v);
+    }  
+}
+
+void loop() {
+    atualizaSensores();
+    atualizaEstado();
+    segueLinha();
+
+    lcd.setCursor(0, 0);
+    lcd.printf("%d %3d %3d %d      ", sensor_parada, (int)dist, (int)(100*velocidade), estadoAtual);
+}
