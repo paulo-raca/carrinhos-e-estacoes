@@ -98,7 +98,8 @@ void atualizaSensores() {
 
 #define CARD_NONE 0
 #define CARD_OTHER 1
-#define CARD_MINE 2
+#define CARD_CASA1 2
+#define CARD_CASA2 3
 
 
 
@@ -111,6 +112,7 @@ int tempoNoEstadoAtual() {
 }
 
 void setState(int newState) {
+  
     estadoAtual = newState;
     estadoAtualDesde = millis();
 }
@@ -118,7 +120,8 @@ void setState(int newState) {
 
 #define TEMPO_FREIO 1000
 #define TEMPO_SAIDA 1000
-#define TEMPO_NA_CASINHA 3000
+#define TEMPO_NA_CASINHA_1 10000
+#define TEMPO_NA_CASINHA_2 40000
 #define TEMPO_NA_CASINHA_ERRADA 1000
 #define TEMPO_MAX_RE 3000
 
@@ -129,8 +132,8 @@ void setState(int newState) {
 #define DIST_SLOWDOWN 20
 #define DIST_FULLSTOP 10
 
-#define TAG_CASINHA1 0x786b1f
-#define TAG_CASINHA2 0x473d10
+#define TAG_CASINHA1 0x473d10
+#define TAG_CASINHA2 0x786b1f
 
 void atualizaEstado() {
 /*
@@ -140,19 +143,22 @@ void atualizaEstado() {
     - vai embora
 */
     // Já leu a tag desta casinha, e não é a casinha que me interessa
-    if (tag == TAG_CASINHA1 || tag == TAG_CASINHA2) {
-        if (card != CARD_MINE) {
-            card = CARD_MINE;
-            Serial.printf("meu cartao: %x\n", tag);
+    if (tag == TAG_CASINHA1) {
+        if (card != CARD_CASA1) {
+            card = CARD_CASA1;
+            Serial.printf("casa1: %x\n", tag);
         }
-    } else if (tag) {
-        if (card != CARD_MINE && card != CARD_OTHER) {
-            card = CARD_OTHER;
-            Serial.printf("outro cartao: %x\n", tag);
-            if (estadoAtual != fsm_andando && estadoAtual != fsm_saindo_da_casinha) {
-                Serial.printf("ignorando esta casinha\n");
-                setState(fsm_saindo_da_casinha);
-            }
+    } else if (tag == TAG_CASINHA2324133) {
+        if (card != CARD_CASA2) {
+            card = CARD_CASA2;
+            Serial.printf("casa2: %x\n", tag);
+        }
+    } else if (tag && card == CARD_NONE) {
+        card = CARD_OTHER;
+        Serial.printf("outro cartao: %x\n", tag);
+        if (estadoAtual != fsm_andando && estadoAtual != fsm_saindo_da_casinha) {
+            Serial.printf("ignorando esta casinha\n");
+            setState(fsm_saindo_da_casinha);
         }
     }
     
@@ -164,7 +170,7 @@ void atualizaEstado() {
             }
             velocidade = SPEED_FULL;
             if (sensor_parada) {
-                Serial.printf("Achei uma casinha! Parou!\n");
+                //Serial.printf("Achei uma casinha! Parou!\n");
                 setState(fsm_parando_na_casinha);
             }
             break;
@@ -172,7 +178,7 @@ void atualizaEstado() {
         case fsm_parando_na_casinha: {
             velocidade = 0;
             if (tempoNoEstadoAtual() >= TEMPO_FREIO) {
-                Serial.printf("Avançando devagar...\n");
+                //Serial.printf("Avançando devagar...\n");
                 setState(fsm_avancando_na_casinha);
             }
             break;
@@ -197,10 +203,10 @@ void atualizaEstado() {
             velocidade = -SPEED_SLOWDOWN;
             if (sensor_parada) {
                 // Chegou
-                Serial.printf("Voltei para a casinha!\n");
+                //Serial.printf("Voltei para a casinha!\n");
                 setState(fsm_esperando_na_casinha);
             } else if (tempoNoEstadoAtual() >= TEMPO_MAX_RE) {
-                Serial.printf("Uai, perdi a casinha! -- Acelerando\n");
+                //Serial.printf("Uai, perdi a casinha! -- Acelerando\n");
                 setState(fsm_andando);
             }
             break;
@@ -208,12 +214,16 @@ void atualizaEstado() {
 
         case fsm_esperando_na_casinha: {
             velocidade = 0;
-            if (card == CARD_MINE && tempoNoEstadoAtual() >= TEMPO_NA_CASINHA) {
-                Serial.printf("Passei tempo suficiente na casinha -- Saindo\n");
+            if (card == CARD_CASA1 && tempoNoEstadoAtual() >= TEMPO_NA_CASINHA_1) {
+                //Serial.printf("Passei tempo suficiente na casinha -- Saindo\n");
+                setState(fsm_saindo_da_casinha);
+            }
+            if (card == CARD_CASA2 && tempoNoEstadoAtual() >= TEMPO_NA_CASINHA_2) {
+                //Serial.printf("Passei tempo suficiente na casinha -- Saindo\n");
                 setState(fsm_saindo_da_casinha);
             }
             if (card == CARD_NONE && tempoNoEstadoAtual() >= TEMPO_NA_CASINHA_ERRADA) {
-                Serial.printf("Não li meu cartao nesta casinha -- Saindo\n");
+                //Serial.printf("Não li meu cartao nesta casinha -- Saindo\n");
                 setState(fsm_saindo_da_casinha);
             }
             break;
@@ -225,7 +235,7 @@ void atualizaEstado() {
             if (sensor_parada) {
                 setState(fsm_saindo_da_casinha);
             } else if (tempoNoEstadoAtual() >= TEMPO_SAIDA) {
-                Serial.printf("Saiu -- Acelerando\n");
+                //Serial.printf("Saiu -- Acelerando\n");
                 setState(fsm_andando);
             }
             break;
@@ -273,6 +283,6 @@ void loop() {
     atualizaEstado();
     segueLinha();
 
-    lcd.setCursor(0, 0);
-    lcd.printf("%d %3d %3d %d      ", sensor_parada, (int)dist, (int)(100*velocidade), estadoAtual);
+    //lcd.setCursor(0, 0);
+    //lcd.printf("%d %3d %3d %d      ", sensor_parada, (int)dist, (int)(100*velocidade), estadoAtual);
 }
